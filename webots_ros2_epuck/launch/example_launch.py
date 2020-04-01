@@ -53,10 +53,24 @@ def generate_launch_description():
                 arguments=['--display-config=' + rviz_config],
                 condition=launch.conditions.IfCondition(use_rviz))
 
+    # SLAM node
+    use_slam = LaunchConfiguration('slam', default=False)
+    slam = Node(
+        parameters=[
+            '/home/lukic/ros2_eloquent/src/webots_ros2/webots_ros2_epuck/resource/slam.yaml'
+        ],
+        package='slam_toolbox',
+        node_executable='async_slam_toolbox_node',
+        name='slam_toolbox',
+        output='screen',
+        condition=launch.conditions.IfCondition(use_slam)
+    )
+
     # Launch descriptor
     launch_entities = [webots,
                        controller,
                        rviz,
+                       slam,
 
                        # Shutdown launch when Webots exits.
                        RegisterEventHandler(

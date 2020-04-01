@@ -108,6 +108,8 @@ class EPuckDriver(WebotsNode):
         self.wheel_distance = wheel_distance_param.value
         self.set_parameters_callback(self.on_param_changed)
 
+        self.static_transforms = []
+
         # Initialize motors
         self.left_motor = self.robot.getMotor('left wheel motor')
         self.right_motor = self.robot.getMotor('right wheel motor')
@@ -141,7 +143,6 @@ class EPuckDriver(WebotsNode):
         # Initialize ground sensors
         self.ground_sensors = {}
         self.ground_sensor_publishers = {}
-        self.ground_sensor_broadcasters = []
         for i in range(3):
             idx = 'gs{}'.format(i)
             ground_sensor = self.robot.getDistanceSensor(idx)
@@ -151,9 +152,7 @@ class EPuckDriver(WebotsNode):
                 self.ground_sensor_publishers[idx] = self.create_publisher(
                     Range, '/' + idx, 1)
 
-                ground_sensor_broadcaster = StaticTransformBroadcaster(self)
                 ground_sensor_transform = TransformStamped()
-                ground_sensor_transform.header.stamp = self.now()
                 ground_sensor_transform.header.frame_id = "base_link"
                 ground_sensor_transform.child_frame_id = "gs" + str(i)
                 ground_sensor_transform.transform.rotation = euler_to_quaternion(
@@ -161,10 +160,7 @@ class EPuckDriver(WebotsNode):
                 ground_sensor_transform.transform.translation.x = SENSOR_DIST_FROM_CENTER - 0.005
                 ground_sensor_transform.transform.translation.y = 0.009 - i * 0.009
                 ground_sensor_transform.transform.translation.z = 0.0
-                ground_sensor_broadcaster.sendTransform(
-                    ground_sensor_transform)
-                self.ground_sensor_broadcasters.append(
-                    ground_sensor_broadcaster)
+                self.static_transforms.append(ground_sensor_transform)
             else:
                 self.get_logger().info(
                     'Ground sensor `{}` is not present for this e-puck version'.format(idx))
@@ -172,7 +168,6 @@ class EPuckDriver(WebotsNode):
         # Intialize distance sensors
         self.distance_sensor_publishers = {}
         self.distance_sensors = {}
-        self.distance_sensor_broadcasters = []
         for i in range(8):
             sensor = self.robot.getDistanceSensor('ps{}'.format(i))
             sensor.enable(self.period.value)
@@ -182,9 +177,7 @@ class EPuckDriver(WebotsNode):
             self.distance_sensor_publishers['ps{}'.format(
                 i)] = sensor_publisher
 
-            distance_sensor_broadcaster = StaticTransformBroadcaster(self)
             distance_sensor_transform = TransformStamped()
-            distance_sensor_transform.header.stamp = self.now()
             distance_sensor_transform.header.frame_id = "base_link"
             distance_sensor_transform.child_frame_id = "ps" + str(i)
             distance_sensor_transform.transform.rotation = euler_to_quaternion(
@@ -194,10 +187,7 @@ class EPuckDriver(WebotsNode):
             distance_sensor_transform.transform.translation.y = SENSOR_DIST_FROM_CENTER * \
                 sin(DISTANCE_SENSOR_ANGLE[i])
             distance_sensor_transform.transform.translation.z = 0.0
-            distance_sensor_broadcaster.sendTransform(
-                distance_sensor_transform)
-            self.distance_sensor_broadcasters.append(
-                distance_sensor_broadcaster)
+            self.static_transforms.append(distance_sensor_transform)
 
         self.laser_publisher = self.create_publisher(LaserScan, '/scan', 1)
 
@@ -205,9 +195,8 @@ class EPuckDriver(WebotsNode):
         if self.tof_sensor:
             self.tof_sensor.enable(self.period.value)
             self.tof_publisher = self.create_publisher(Range, '/tof', 1)
-            self.tof_broadcaster = StaticTransformBroadcaster(self)
+
             tof_transform = TransformStamped()
-            tof_transform.header.stamp = self.now()
             tof_transform.header.frame_id = "base_link"
             tof_transform.child_frame_id = "tof"
             tof_transform.transform.rotation.x = 0.0
@@ -217,7 +206,7 @@ class EPuckDriver(WebotsNode):
             tof_transform.transform.translation.x = SENSOR_DIST_FROM_CENTER
             tof_transform.transform.translation.y = 0.0
             tof_transform.transform.translation.z = 0.0
-            self.tof_broadcaster.sendTransform(tof_transform)
+            self.static_transforms.append(tof_transform)
         else:
             self.get_logger().info('ToF sensor is not present for this e-puck version')
 
@@ -263,7 +252,6 @@ class EPuckDriver(WebotsNode):
         # Initialize Light sensors
         self.light_sensors = []
         self.light_publishers = []
-        self.light_sensor_broadcasters = []
         for i in range(NB_LIGHT_SENSORS):
             light_sensor = self.robot.getLightSensor(f'ls{i}')
             light_sensor.enable(self.period.value)
@@ -271,9 +259,7 @@ class EPuckDriver(WebotsNode):
             self.light_publishers.append(light_publisher)
             self.light_sensors.append(light_sensor)
 
-            light_sensor_broadcaster = StaticTransformBroadcaster(self)
             light_transform = TransformStamped()
-            light_transform.header.stamp = self.now()
             light_transform.header.frame_id = "base_link"
             light_transform.child_frame_id = "ls" + str(i)
             light_transform.transform.rotation = euler_to_quaternion(
@@ -283,13 +269,10 @@ class EPuckDriver(WebotsNode):
             light_transform.transform.translation.y = SENSOR_DIST_FROM_CENTER * \
                 sin(DISTANCE_SENSOR_ANGLE[i])
             light_transform.transform.translation.z = 0.0
-            light_sensor_broadcaster.sendTransform(light_transform)
-            self.light_sensor_broadcasters.append(light_sensor_broadcaster)
+            self.static_transforms.append(light_transform)
 
         # Static tf broadcaster: Laser
-        self.laser_broadcaster = StaticTransformBroadcaster(self)
         laser_transform = TransformStamped()
-        laser_transform.header.stamp = self.now()
         laser_transform.header.frame_id = "base_link"
         laser_transform.child_frame_id = "laser_scanner"
         laser_transform.transform.rotation.x = 0.0
@@ -299,13 +282,14 @@ class EPuckDriver(WebotsNode):
         laser_transform.transform.translation.x = 0.0
         laser_transform.transform.translation.y = 0.0
         laser_transform.transform.translation.z = 0.0
-        self.laser_broadcaster.sendTransform(laser_transform)
+        self.static_transforms.append(laser_transform)
 
         # Main loop
         self.create_timer(self.period.value / 1000, self.step_callback)
 
         # Transforms
         self.tf_broadcaster = TransformBroadcaster(self)
+        self.tf_static_broadcaster = StaticTransformBroadcaster(self)
 
     def on_rgb_led_callback(self, msg, index):
         self.rgb_leds[index].set(msg.data)
@@ -337,6 +321,9 @@ class EPuckDriver(WebotsNode):
     def step_callback(self):
         self.robot.step(self.period.value)
         stamp = self.now()
+
+        # This should be latched topic
+        self.tf_static_broadcaster.sendTransform(self.static_transforms)
 
         self.publish_odometry_data(stamp)
         self.publish_distance_data(stamp)
