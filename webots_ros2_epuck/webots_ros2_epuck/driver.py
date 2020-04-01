@@ -291,6 +291,10 @@ class EPuckDriver(WebotsNode):
         self.tf_broadcaster = TransformBroadcaster(self)
         self.tf_static_broadcaster = StaticTransformBroadcaster(self)
 
+        twist = Twist()
+        twist.angular.z = 0.1
+        self.create_publisher(Twist, '/cmd_vel', 1).publish(twist)
+
     def on_rgb_led_callback(self, msg, index):
         self.rgb_leds[index].set(msg.data)
 
