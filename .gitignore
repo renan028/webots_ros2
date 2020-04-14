@@ -1,5 +1,7 @@
 /build
 /install
 /log
-test/
 .eggs/
+
+*.pyc
+.vscode
