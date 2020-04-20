@@ -18,6 +18,7 @@
 # ros2 run webots_ros2_epuck drive_calibrator --ros-args -p type:=linear -p wheel_radius:=0.021
 
 from enum import Enum
+from math import pi
 import rclpy
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Range
@@ -40,13 +41,17 @@ DEFAULT_WHEEL_RADIUS = 0.021
 RANGE_N_MEASUREMENTS = 15
 RADIUS_STEP_SIZE = 0.02
 LINEAR_VELOCITY = 0.02
+ANGULAR_VELOCITY = 0.5
+N_ROTATIONS = 2
 
 
 class State(Enum):
     LINEAR_MOVE = 1
     ANGULAR_MOVE = 2
     MEASURE_RANGE = 3
-    ANGULAR_FIND_FEATURE = 4
+    ANGULAR_FIND_SAVED_LANDMARK = 4
+    ANGULAR_FIND_NEW_LANDMARK = 5
+    DONE = 6
 
 
 class EPuckDriveCalibrator(Node):
@@ -77,17 +82,24 @@ class EPuckDriveCalibrator(Node):
         self.get_logger().info('Setting wheel distance to: {}m'.format(self.wheel_distance_param.value))
         self.get_logger().info('Setting wheel radius to: {}m'.format(self.wheel_radius_param.value))
 
-        self.state = State.MEASURE_RANGE
+        # FSM parameters
+        self.state = State.ANGULAR_FIND_NEW_LANDMARK
         self.range_sum = 0
         self.range_avg = 0
         self.range_n_measurements = 0
         self.range_start = 0
         self.range_initial = True
-        self.range_prev = 0
+        self.range_prev = -1
+        self.landmark_first = 0
+        self.landmark_second = 0
+        self.landmark_found = False
         self.move_distance = 0
         self.move_direction = 1
+        self.move_n_rotations = 0
+        self.odom_angular_start = 0
         self.odom_last_linear = 0
         self.odom_last_angular = 0
+        self.odom_last_angular_abs = 0
         self.odom_prev_linear = 0
         self.wheel_radius = self.wheel_radius_param.value
 
@@ -116,9 +128,8 @@ class EPuckDriveCalibrator(Node):
                 self.range_n_measurements += 1
             else:
                 self.range_avg = self.range_sum / RANGE_N_MEASUREMENTS
-
-                # Update wheel radius
                 if not self.range_initial:
+                    # Update wheel radius
                     range_diff = abs(self.range_start - self.range_avg)
                     estimated_error = abs(self.odom_last_linear - self.odom_prev_linear) - range_diff
                     new_wheel_radius = self.wheel_radius + estimated_error * RADIUS_STEP_SIZE
@@ -137,7 +148,7 @@ class EPuckDriveCalibrator(Node):
                 self.state = State.LINEAR_MOVE
 
         # LINEAR_MOVE: Move linearly
-        if self.state == State.LINEAR_MOVE:
+        elif self.state == State.LINEAR_MOVE:
             if abs(msg.range - self.range_start) < self.distance.value:
                 self.set_velocity(LINEAR_VELOCITY * self.move_direction, 0)
             else:
@@ -146,10 +157,64 @@ class EPuckDriveCalibrator(Node):
                 self.range_n_measurements = 0
                 self.state = State.MEASURE_RANGE
 
+        # ANGULAR_FIND_NEW_LANDMARK: Find suitable distance pair for landmark
+        elif self.state == State.ANGULAR_FIND_NEW_LANDMARK:
+            if abs(msg.range - self.range_prev) > 0.1 and \
+                self.range_prev < 0.1 and \
+                self.range_prev != -1:
+                self.set_velocity(0, 0)
+                self.landmark_found = True
+                self.landmark_first = self.range_prev
+                self.landmark_second = msg.range
+                self.get_logger().info('Landmark has been created, landmark pair ({}, {})'.format(
+                    self.landmark_first,
+                    self.landmark_second
+                ))
+                self.get_logger().info('Looking for this landmark...')
+                self.odom_angular_start = self.odom_last_angular_abs
+                self.state = State.ANGULAR_FIND_SAVED_LANDMARK
+            else:
+                self.set_velocity(0, ANGULAR_VELOCITY)
+
+        # ANGULAR_FIND_SAVED_LANDMARK: Find saved landmark
+        elif self.state == State.ANGULAR_FIND_SAVED_LANDMARK:
+            if abs(self.landmark_first - self.range_prev) > 0.01 or abs(self.landmark_second - msg.range) > 0.03:
+                self.set_velocity(0, ANGULAR_VELOCITY)
+            else:
+                self.set_velocity(0, 0)
+                self.get_logger().info('Landmark found')
+                self.state = State.ANGULAR_MOVE
+
+        # ANGULAR_MOVE: Rotate the robot
+        elif self.state == State.ANGULAR_MOVE:
+            self.move_n_rotations += 1
+            self.get_logger().info('Number of rotations: {}'.format(self.move_n_rotations))
+            self.state = State.ANGULAR_FIND_SAVED_LANDMARK
+
+            if self.move_n_rotations == N_ROTATIONS:
+                self.move_n_rotations = 0
+                self.set_velocity(0, 0)
+                odom_rotations = (self.odom_last_angular_abs - self.odom_angular_start) / (2 * pi)
+
+                self.get_logger().info('All rotations ({}) have been performed'.format(N_ROTATIONS))
+                
+                self.get_logger().info('Rotations according to odometry: {}'.format(odom_rotations))
+                self.state = State.DONE
+
+        self.range_prev = msg.range
 
     def odometry_callback(self, msg: Odometry):
         yaw, _, _ = quaternion_to_euler(msg.pose.pose.orientation)
         self.odom_last_linear = msg.pose.pose.position.x
+
+        # Positive rotation and singularity
+        if yaw - self.odom_last_angular > pi:
+            self.odom_last_angular_abs += 2*pi - (yaw - self.odom_last_angular)
+        # Negative rotation and singularity
+        elif self.odom_last_angular - yaw > pi:
+            self.odom_last_angular_abs += 2*pi - (self.odom_last_angular - yaw)
+        else:
+            self.odom_last_angular_abs += yaw - self.odom_last_angular
         self.odom_last_angular = yaw
 
 
