@@ -40,9 +40,16 @@ DEFAULT_WHEEL_RADIUS = 0.021
 
 RANGE_N_MEASUREMENTS = 15
 RADIUS_STEP_SIZE = 0.02
+DISTANCE_STEP_SIZE = 0.1
 LINEAR_VELOCITY = 0.02
 ANGULAR_VELOCITY = 0.5
 N_ROTATIONS = 2
+WHEEL_DISTANCE_TOLERANCE = 0.05
+WHEEL_RADIUS_TOLERANCE = 0.01
+LANDMARK_SHORT_TOLERANCE = 0.01
+LANDMARK_LONG_TOLERANCE = 0.01
+LANDMARK_MIN_DIFF = 0.1
+LANDMARK_MAX_DISTANCE = 0.1
 
 
 class State(Enum):
@@ -51,7 +58,8 @@ class State(Enum):
     MEASURE_RANGE = 3
     ANGULAR_FIND_SAVED_LANDMARK = 4
     ANGULAR_FIND_NEW_LANDMARK = 5
-    DONE = 6
+    SUMMARY = 6
+    DONE = 7
 
 
 class EPuckDriveCalibrator(Node):
@@ -83,7 +91,7 @@ class EPuckDriveCalibrator(Node):
         self.get_logger().info('Setting wheel radius to: {}m'.format(self.wheel_radius_param.value))
 
         # FSM parameters
-        self.state = State.ANGULAR_FIND_NEW_LANDMARK
+        self.state = State.MEASURE_RANGE
         self.range_sum = 0
         self.range_avg = 0
         self.range_n_measurements = 0
@@ -102,6 +110,7 @@ class EPuckDriveCalibrator(Node):
         self.odom_last_angular_abs = 0
         self.odom_prev_linear = 0
         self.wheel_radius = self.wheel_radius_param.value
+        self.wheel_distance = self.wheel_distance_param.value
 
     def set_param(self, name, value):
         req = SetParameters.Request()
@@ -127,25 +136,27 @@ class EPuckDriveCalibrator(Node):
                 self.range_sum += msg.range
                 self.range_n_measurements += 1
             else:
+                go_to_move = True
                 self.range_avg = self.range_sum / RANGE_N_MEASUREMENTS
                 if not self.range_initial:
                     # Update wheel radius
                     range_diff = abs(self.range_start - self.range_avg)
                     estimated_error = abs(self.odom_last_linear - self.odom_prev_linear) - range_diff
                     new_wheel_radius = self.wheel_radius + estimated_error * RADIUS_STEP_SIZE
-                    self.get_logger().info('Updating wheel radius from {} to {}'.format(
-                        self.wheel_radius,
-                        new_wheel_radius
-                    ))
+                    self.get_logger().info('Updating wheel radius from {} to {}'.format(self.wheel_radius, new_wheel_radius))
                     self.set_param('wheel_radius', new_wheel_radius)
                     self.wheel_radius = new_wheel_radius
+                    if estimated_error < WHEEL_RADIUS_TOLERANCE:
+                        self.state = State.ANGULAR_FIND_NEW_LANDMARK
+                        go_to_move = False
+                if go_to_move:
+                    # Go to next state
+                    self.move_direction = 1 if self.range_avg > self.distance.value else -1
+                    self.range_start = self.range_avg
+                    self.state = State.LINEAR_MOVE
+
                 self.range_initial = False
                 self.odom_prev_linear = self.odom_last_linear
-
-                # Go to next state
-                self.move_direction = 1 if self.range_avg > self.distance.value else -1
-                self.range_start = self.range_avg
-                self.state = State.LINEAR_MOVE
 
         # LINEAR_MOVE: Move linearly
         elif self.state == State.LINEAR_MOVE:
@@ -159,9 +170,9 @@ class EPuckDriveCalibrator(Node):
 
         # ANGULAR_FIND_NEW_LANDMARK: Find suitable distance pair for landmark
         elif self.state == State.ANGULAR_FIND_NEW_LANDMARK:
-            if abs(msg.range - self.range_prev) > 0.1 and \
-                self.range_prev < 0.1 and \
-                self.range_prev != -1:
+            if abs(msg.range - self.range_prev) > LANDMARK_MIN_DIFF and \
+                    self.range_prev < LANDMARK_MAX_DISTANCE and \
+                    self.range_prev != -1:
                 self.set_velocity(0, 0)
                 self.landmark_found = True
                 self.landmark_first = self.range_prev
@@ -178,7 +189,8 @@ class EPuckDriveCalibrator(Node):
 
         # ANGULAR_FIND_SAVED_LANDMARK: Find saved landmark
         elif self.state == State.ANGULAR_FIND_SAVED_LANDMARK:
-            if abs(self.landmark_first - self.range_prev) > 0.01 or abs(self.landmark_second - msg.range) > 0.03:
+            if abs(self.landmark_first - self.range_prev) > LANDMARK_SHORT_TOLERANCE or \
+                abs(self.landmark_second - msg.range) > LANDMARK_LONG_TOLERANCE:
                 self.set_velocity(0, ANGULAR_VELOCITY)
             else:
                 self.set_velocity(0, 0)
@@ -195,11 +207,25 @@ class EPuckDriveCalibrator(Node):
                 self.move_n_rotations = 0
                 self.set_velocity(0, 0)
                 odom_rotations = (self.odom_last_angular_abs - self.odom_angular_start) / (2 * pi)
-
                 self.get_logger().info('All rotations ({}) have been performed'.format(N_ROTATIONS))
-                
                 self.get_logger().info('Rotations according to odometry: {}'.format(odom_rotations))
-                self.state = State.DONE
+
+                # Set new wheel distance
+                estimated_error = odom_rotations - N_ROTATIONS
+                new_wheel_distance = self.wheel_distance - estimated_error * DISTANCE_STEP_SIZE
+                self.get_logger().info('Updating wheel distance from {} to {}'.format(self.wheel_distance, new_wheel_distance))
+                self.set_param('wheel_distance', new_wheel_distance)
+                self.wheel_distance = new_wheel_distance
+
+                if estimated_error < WHEEL_DISTANCE_TOLERANCE:
+                    self.state = State.SUMMARY
+                self.get_logger().info('Estimated error: {}'.format(estimated_error))
+
+        # SUMMARY: Print the results
+        elif self.state == State.SUMMARY:
+            self.get_logger().info('Estimated wheel distance: {}'.format(self.wheel_distance))
+            self.get_logger().info('Estimated wheel radius: {}'.format(self.wheel_radius))
+            self.state = State.DONE
 
         self.range_prev = msg.range
 
