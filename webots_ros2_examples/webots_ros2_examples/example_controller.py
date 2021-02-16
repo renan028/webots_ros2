@@ -29,8 +29,8 @@ class ExampleController(WebotsNode):
         super().__init__('example_controller', args)
         self.sensorTimer = self.create_timer(0.001 * self.timestep,
                                              self.sensor_callback)
-        self.leftMotor = self.robot.getMotor('motor.left')
-        self.rightMotor = self.robot.getMotor('motor.right')
+        self.leftMotor = self.robot.getDevice('motor.left')
+        self.rightMotor = self.robot.getDevice('motor.right')
         self.leftMotor.setPosition(float('inf'))
         self.rightMotor.setPosition(float('inf'))
         self.leftMotor.setVelocity(0)

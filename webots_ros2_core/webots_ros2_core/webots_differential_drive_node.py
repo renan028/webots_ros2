@@ -77,7 +77,7 @@ class WebotsDifferentialDriveNode(WebotsNode):
         robot_base_frame_param = self.declare_parameter('robot_base_frame', robot_base_frame)
         self._wheel_radius = wheel_radius_param.value
         self._wheel_distance = wheel_distance_param.value
-        self.set_parameters_callback(self._on_param_changed)
+        self.add_on_set_parameters_callback(self._on_param_changed)
         if self._wheel_radius == 0 or self._wheel_distance == 0:
             self.get_logger().error('Parameters `wheel_distance` and `wheel_radius` have to greater than 0')
             self.destroy_node()
@@ -92,8 +92,8 @@ class WebotsDifferentialDriveNode(WebotsNode):
         self._robot_base_frame = robot_base_frame_param.value
 
         # Initialize motors
-        self.left_motor = self.robot.getMotor(left_joint_param.value)
-        self.right_motor = self.robot.getMotor(right_joint_param.value)
+        self.left_motor = self.robot.getDevice(left_joint_param.value)
+        self.right_motor = self.robot.getDevice(right_joint_param.value)
         self.left_motor.setPosition(float('inf'))
         self.right_motor.setPosition(float('inf'))
         self.left_motor.setVelocity(0)
@@ -102,8 +102,8 @@ class WebotsDifferentialDriveNode(WebotsNode):
 
         # Initialize odometry
         self.reset_odometry()
-        self.left_wheel_sensor = self.robot.getPositionSensor(left_encoder_param.value)
-        self.right_wheel_sensor = self.robot.getPositionSensor(right_encoder_param.value)
+        self.left_wheel_sensor = self.robot.getDevice(left_encoder_param.value)
+        self.right_wheel_sensor = self.robot.getDevice(right_encoder_param.value)
         self.left_wheel_sensor.enable(self.timestep)
         self.right_wheel_sensor.enable(self.timestep)
         self._odometry_publisher = self.create_publisher(Odometry, odometry_topic_param.value, 1)
