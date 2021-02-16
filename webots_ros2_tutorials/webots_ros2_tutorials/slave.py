@@ -47,20 +47,20 @@ class ServiceNodeVelocity(WebotsNode):
         self.get_logger().info('Sensor enabled')
 
         # Front wheels
-        self.left_motor_front = self.robot.getMotor('left_front_wheel')
+        self.left_motor_front = self.robot.getDevice('left_front_wheel')
         self.left_motor_front.setPosition(float('inf'))
         self.left_motor_front.setVelocity(0)
 
-        self.right_motor_front = self.robot.getMotor('right_front_wheel')
+        self.right_motor_front = self.robot.getDevice('right_front_wheel')
         self.right_motor_front.setPosition(float('inf'))
         self.right_motor_front.setVelocity(0)
 
         # Rear wheels
-        self.left_motor_rear = self.robot.getMotor('left_rear_wheel')
+        self.left_motor_rear = self.robot.getDevice('left_rear_wheel')
         self.left_motor_rear.setPosition(float('inf'))
         self.left_motor_rear.setVelocity(0)
 
-        self.right_motor_rear = self.robot.getMotor('right_rear_wheel')
+        self.right_motor_rear = self.robot.getDevice('right_rear_wheel')
         self.right_motor_rear.setPosition(float('inf'))
         self.right_motor_rear.setVelocity(0)
 
