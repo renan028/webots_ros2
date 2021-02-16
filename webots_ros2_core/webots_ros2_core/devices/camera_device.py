@@ -15,6 +15,7 @@
 """Camera device."""
 
 from sensor_msgs.msg import Image, CameraInfo
+from webots_ros2_msgs.msg import RecognitionObjects, RecognitionObject
 from rclpy.time import Time
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, QoSReliabilityPolicy, qos_profile_sensor_data
 from .sensor_device import SensorDevice
@@ -43,6 +44,7 @@ class CameraDevice(SensorDevice):
     def __init__(self, node, device_key, wb_device, params=None):
         super().__init__(node, device_key, wb_device, params)
         self._camera_info_publisher = None
+        self._recognition_publisher = None
         self._image_publisher = None
 
         # Create topics
@@ -62,6 +64,12 @@ class CameraDevice(SensorDevice):
                     history=HistoryPolicy.KEEP_LAST,
                 )
             )
+            if self._wb_device.hasRecognition():
+                self._recognition_publisher = self._node.create_publisher(
+                    RecognitionObjects,
+                    self._topic_name + '/recognition',
+                    qos_profile_sensor_data
+                )
 
             # CameraInfo data
             self.__message_info = CameraInfo()
@@ -121,5 +129,29 @@ class CameraDevice(SensorDevice):
 
             self.__message_info.header.stamp = Time(seconds=self._node.robot.getTime()).to_msg()
             self._camera_info_publisher.publish(self.__message_info)
+
+            if self._wb_device.hasRecognition() and self._recognition_publisher.get_subscription_count() > 0:
+                self._wb_device.recognitionEnable(self._timestep)
+                objects = self._wb_device.getRecognitionObjects()
+
+                if objects is None:
+                    return
+                
+                # Recognition data
+                msg = RecognitionObjects()
+                msg.header.stamp = stamp
+                msg.header.frame_id = self._frame_id
+                for obj in objects:
+                    msg_obj = RecognitionObject()
+                    msg_obj.position = obj.get_position()
+                    msg_obj.position_on_image = obj.get_position_on_image()
+                    msg_obj.size_on_image = obj.get_size_on_image()
+                    msg_obj.number_of_colors = obj.get_number_of_colors()
+                    msg_obj.colors = obj.get_colors()
+                    msg_obj.model = str(obj.get_model())
+                    msg.objects.append(msg_obj)
+                self._recognition_publisher.publish(msg)
+            else: 
+                self._wb_device.recognitionDisable()
         else:
             self._wb_device.disable()
